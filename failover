@@ -26,11 +26,11 @@
     # Functions
     log() {
     	echo "${TIME} | ${LOGMESSAGE}" >> "${DPATH}/log"
-	if [ "${DEBUG}" = 1 ]; then echo "${LOGMESSAGE}"; fi
+		if [ "${DEBUG}" = 1 ]; then echo "${LOGMESSAGE}"; fi
     }
     update_status() {
-	echo "${STATUS}" > "${DPATH}/status"
-	LOGMESSAGE="Default route changed to ${STATUS}"; log
+		echo "${STATUS}" > "${DPATH}/status"
+		LOGMESSAGE="Default route changed to ${STATUS}"; log
     }
 
     # Create work directory, if needed
@@ -149,27 +149,27 @@
 
     # WAN1 is online, make WAN1 default
     if [ "${WAN1GW2P}" -gt 0 ]; then
-	if ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule del from 0.0.0.0/0 table "${WAN2NET}" priority 300; fi
-	if ! ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule add from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
-	if [ "$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN2IP}" 2>/dev/null; fi
-	if [ "${STATUS}" != "${WAN1NET}" ]; then STATUS="${WAN1NET}"; update_status; fi
+		if ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule del from 0.0.0.0/0 table "${WAN2NET}" priority 300; fi
+		if ! ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule add from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
+		if [ "$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN2IP}" 2>/dev/null; fi
+		if [ "${STATUS}" != "${WAN1NET}" ]; then STATUS="${WAN1NET}"; update_status; fi
     fi
 
     # WAN1 is offline, WAN2 is online, make WAN2 default
     if [ "${WAN1GW2P}" -lt 1 -a "${WAN2GW2P}" -gt 0 ]; then
-	if ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule del from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
-	if ! ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule add from 0.0.0.0/0 table "${WAN2NET}" priority 300 2>/dev/null; fi
-	if [ "$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN1IP}" 2>/dev/null; fi
-	if [ "${STATUS}" != "${WAN2NET}" ]; then STATUS="${WAN2NET}"; update_status; fi
+		if ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule del from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
+		if ! ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule add from 0.0.0.0/0 table "${WAN2NET}" priority 300 2>/dev/null; fi
+		if [ "$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN1IP}" 2>/dev/null; fi
+		if [ "${STATUS}" != "${WAN2NET}" ]; then STATUS="${WAN2NET}"; update_status; fi
     fi
 
     # WAN1 and WAN2 are offline, shut down all default routes
     if [ "${WAN1GW2P}" -lt 1 -a "${WAN2GW2P}" -lt 1 ]; then
-	if ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule del from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
-	if ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule del from 0.0.0.0/0 table "${WAN2NET}" priority 300 2>/dev/null; fi
-	if [ "$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN1IP}" 2>/dev/null; fi
-	if [ "$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN2IP}" 2>/dev/null; fi
-	if [ "${STATUS}" != "OFFLINE" ]; then STATUS=OFFLINE; update_status; fi
+		if ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule del from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
+		if ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule del from 0.0.0.0/0 table "${WAN2NET}" priority 300 2>/dev/null; fi
+		if [ "$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN1IP}" 2>/dev/null; fi
+		if [ "$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN2IP}" 2>/dev/null; fi
+		if [ "${STATUS}" != "OFFLINE" ]; then STATUS=OFFLINE; update_status; fi
     fi
 
     echo "NEW STATUS: ${STATUS}"
@@ -177,128 +177,128 @@
     # Prepare web status (http://<router-IP>/wan-status.html)
     if [ "${WEBSTATUS}" = 1 ]; then
 
-	if [ "${WAN1GW2P}" -lt 1 -o "${WAN2GW2P}" -lt 1 ]; then BGCOLOR=#400000; else BGCOLOR=#004000; fi
-	if [ "${WAN1GW2P}" -gt 0 ]; then WAN1COLOR1=#008000; WAN1COLOR2=#006000; else WAN1COLOR1=#800000; WAN1COLOR2=#600000; fi
-	if [ "${WAN2GW2P}" -gt 0 ]; then WAN2COLOR1=#008000; WAN2COLOR2=#006000; else WAN2COLOR1=#800000; WAN2COLOR2=#600000; fi
-
-	CSS="
-	body { color: white; font-family: Courier New,Monospace; font-size: 9pt; background-color: ${BGCOLOR}; }
-	td { padding: 0; border: 0; margin: 0; }
-	table { border-spacing: 0; border-collapse: collapse; }
-	h1, h2, h3, h4 { font-family: Arial; }
-	div { border: 0; margin: 0; padding: 0; }
-	pre { margin: 0; }
-	.vt1 { font-family: Arial,Sans-Serif; font-size: 6pt; }
-	.vt2 { font-family: Arial,Sans-Serif; font-size: 20pt; font-weight: bolder; }
-	.container { display: flex; justify-content: flex-start; column-gap: 50px; row-gap: 0px; }
-	.item { } @media (max-width: 1900px) { .container { flex-direction: column; } }
-	.caption { font-family: Arial,Sans-Serif; font-size: 8pt; padding: 1px 5px 1px 5px; }
-	.field { background-color: rgba(0, 0, 0, 0.5); font-size: 10pt; padding: 1px 5px 1px 5px; border: 0; margin: 0; }
-	.valigntop { vertical-align: top; }
-	.background1 { background-color: rgba(0, 0, 0, 0.5); }
-	"
-
-	HTML="
-	<!DOCTYPE html>
-	<html>
-	<head>
-	<meta http-equiv=\"refresh\" content=\"5\">
-	<meta charset=\"utf-8\">
-	<title>WAN-Status | ${STATUS}</title>
-	<style>${CSS}</style>
-	</head>
-	<body><blockquote><div class=\"container\">
-	<div class=\"item\">
-	<h1>WAN-Status</h1>
-	<br>
-	<table>
-	  <tr>
-	    <td width=\"50\" style=\"background-color: ${WAN1COLOR1}; text-align: center;\"><font class=\"vt1\">LINK</font><br><font class=\"vt2\">1</font></td>
-	    <td width=\"460\" style=\"background-color: ${WAN1COLOR2};\">
-	      <table width=\"100%\">
-	        <tr><td class=\"caption\" width=\"60\">Interface:</td><td class=\"field\">${WAN1NET}</td></tr>
-	        <tr><td class=\"caption\">Name:</td><td class=\"field\">${WAN1NAME}<//td></tr>
-	        <tr><td class=\"caption\">Device:</td><td class=\"field\">${WAN1DEV}</td></tr>
-	        <tr><td class=\"caption\">IP:</td><td class=\"field\">${WAN1IP}</td></tr>
-	        <tr><td class=\"caption\">Gateway 1:</td><td class=\"field\">${WAN1GW1}</td></tr>
-	        <tr><td class=\"caption\">Gateway 2:</td><td class=\"field\">${WAN1GW2}</td></tr>
-	        <tr><td class=\"caption\">Ping:</td><td class=\"field\">${WAN1GW2P} ping(s)</td></tr>
-	        <tr><td class=\"caption\">Status:</td><td class=\"field\">${WAN1GW2PXN}</td></tr>
-	      </table>
-	    </td>
-	    <td width=\"30\">
-	    <td width=\"50\" style=\"background-color: ${WAN2COLOR1}; text-align: center;\"><font class=\"vt1\">LINK</font><br><font class=\"vt2\">2</font></td>
-	    <td width=\"460\" style=\"background-color: ${WAN2COLOR2};\">
-	      <table width=\"100%\">
-	        <tr><td class=\"caption\" width=\"60\">Interface:</td><td class=\"field\">${WAN2NET}</td></tr>
-	        <tr><td class=\"caption\">Name:</td><td class=\"field\">${WAN2NAME}</td></tr>
-	        <tr><td class=\"caption\">Device:</td><td class=\"field\">${WAN2DEV}</td></tr>
-	        <tr><td class=\"caption\">IP:</td><td class=\"field\">${WAN2IP}</td></tr>
-	        <tr><td class=\"caption\">Gateway 1:</td><td class=\"field\">${WAN2GW1}</td></tr>
-	        <tr><td class=\"caption\">Gateway 2:</td><td class=\"field\">${WAN2GW2}</td></tr>
-	        <tr><td class=\"caption\">Ping:</td><td class=\"field\">${WAN2GW2P} ping(s)</td></tr>
-	        <tr><td class=\"caption\">Status:</td><td class=\"field\">${WAN2GW2PXN}</td></tr>
-	      </table>
-	    </td>
-	  </tr>
-	  <tr>
-	    <td colspan=\"2\" style=\"background-color: ${WAN1COLOR2};\"><table width=\"100%\">
-	      <tr><td class=\"caption\">Routing-Table <b>${WAN1NET}</b>:</td></tr>
-	      <tr><td class=\"field\"><pre>$(ip route show table 201)</pre></td></tr>
-	      <tr><td class=\"caption\">Routing-Table <b>main</b> ( ${WAN1DEV} = ${WAN1NET} ):</td></tr>
-	      <tr><td class=\"field\"><pre>$(ip route show|grep -E "${WAN1DEV}")</pre></td></tr>
-	    </table></td>
-	    <td></td>
-	    <td colspan=\"2\" style=\"background-color: ${WAN2COLOR2};\"><table width=\"100%\">
-	      <tr><td class=\"caption\">Routing-Table <b>${WAN2NET}</b>:</td></tr>
-	      <tr><td class=\"field\"><pre>$(ip route show table 202)</pre></td></tr>
-	      <tr><td class=\"caption\">Routing-Table <b>main</b> ( ${WAN2DEV} = ${WAN2NET} ):</td></tr>
-	      <tr><td class=\"field\"><pre>$(ip route show|grep -E "${WAN2DEV}")</pre></td></tr>
-	    </table></td>
-	  </tr>
-	</table>
-	<br>
-	<hr style=\"background-color: black; height: 1px; border: none; \">
-	<br>
-	<pre class=\"field\">TIME: <b>${TIME}</b>, STATUS: <b>${STATUS}</b>, VERSION: <b>${VERSION}</b></pre>
-	<br>
-	<table>
-	  <tr>
-	    <td width=\"510\" class=\"valigntop\"><font class=\"caption\">Routing-Rules ( regarding <b>main</b>, <b>${WAN1NET}</b> and <b>${WAN2NET}</b> only )</font><pre class=\"field\">$(ip rule show|grep -E "main|${WAN1NET}|${WAN2NET}")</pre></td>
-	    <td width=\"30\"></td>
-	    <td width=\"510\" class=\"valigntop\"><font class=\"caption\">Traceroute to <b>${TRACEROUTE}</b> ( first two hops only, default route )</font><pre class=\"field\">$(traceroute -n -m2 ${TRACEROUTE}|tail -n2)</pre>
-	    </td>
-	  </tr>
-	</table>"
-
-	if [ -f "${DPATH}/log" ]; then
-	HTML="${HTML}
-	<br>
-	<font class=\"caption\">Log ( lastest events )</font><pre class=\"field\">$(cat "${DPATH}/log"|tail -n10)</pre>"
-	fi
-
-	HTML="${HTML}
-	</div>
-	<div class=\"item\">
-	<br>
-	<font class=\"caption\">Established TCP-Connections via <b>${WAN1NAME}</b></font>
-	<pre class=\"field\">$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|grep tcp|grep HW_OFFLOAD|grep -v -E 'FIN_WAIT|CLOSE|TIME_WAIT'|awk '{print $(NF-14) " " $(NF-13) " " $(NF-12) " " $(NF-11) " <b>HW-Offload!</b>"}'|sort -V)<br>$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|grep tcp|grep ESTABLISHED|awk '{print $5 " " $6 " " $7 " " $8}'|sort -V)</pre>
-	<br>
-	<font class=\"caption\">Established TCP-Connections via <b>${WAN2NAME}</b></font>
-	<pre class=\"field\">$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|grep tcp|grep HW_OFFLOAD|grep -v -E 'FIN_WAIT|CLOSE|TIME_WAIT'|awk '{print $(NF-14) " " $(NF-13) " " $(NF-12) " " $(NF-11) " <b>HW-Offload!</b>"}'|sort -V)<br>$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|grep tcp|grep ESTABLISHED|awk '{print $5 " " $6 " " $7 " " $8}'|sort -V)</pre>
-	</div>
-	</div></blockquote></body>
-	</html>"
-
-	echo "${HTML}" > "${DPATH}/wan-status.html.tmp"
-	mv "${DPATH}/wan-status.html.tmp" "${DPATH}/wan-status.html"
-	if [ ! -L "/www/wan-status.html" ]; then ln -s "${DPATH}/wan-status.html" "/www/wan-status.html"; fi
+		if [ "${WAN1GW2P}" -lt 1 -o "${WAN2GW2P}" -lt 1 ]; then BGCOLOR=#400000; else BGCOLOR=#004000; fi
+		if [ "${WAN1GW2P}" -gt 0 ]; then WAN1COLOR1=#008000; WAN1COLOR2=#006000; else WAN1COLOR1=#800000; WAN1COLOR2=#600000; fi
+		if [ "${WAN2GW2P}" -gt 0 ]; then WAN2COLOR1=#008000; WAN2COLOR2=#006000; else WAN2COLOR1=#800000; WAN2COLOR2=#600000; fi
+	
+		CSS="
+		body { color: white; font-family: Courier New,Monospace; font-size: 9pt; background-color: ${BGCOLOR}; }
+		td { padding: 0; border: 0; margin: 0; }
+		table { border-spacing: 0; border-collapse: collapse; }
+		h1, h2, h3, h4 { font-family: Arial; }
+		div { border: 0; margin: 0; padding: 0; }
+		pre { margin: 0; }
+		.vt1 { font-family: Arial,Sans-Serif; font-size: 6pt; }
+		.vt2 { font-family: Arial,Sans-Serif; font-size: 20pt; font-weight: bolder; }
+		.container { display: flex; justify-content: flex-start; column-gap: 50px; row-gap: 0px; }
+		.item { } @media (max-width: 1900px) { .container { flex-direction: column; } }
+		.caption { font-family: Arial,Sans-Serif; font-size: 8pt; padding: 1px 5px 1px 5px; }
+		.field { background-color: rgba(0, 0, 0, 0.5); font-size: 10pt; padding: 1px 5px 1px 5px; border: 0; margin: 0; }
+		.valigntop { vertical-align: top; }
+		.background1 { background-color: rgba(0, 0, 0, 0.5); }
+		"
+	
+		HTML="
+		<!DOCTYPE html>
+		<html>
+		<head>
+		<meta http-equiv=\"refresh\" content=\"5\">
+		<meta charset=\"utf-8\">
+		<title>WAN-Status | ${STATUS}</title>
+		<style>${CSS}</style>
+		</head>
+		<body><blockquote><div class=\"container\">
+		<div class=\"item\">
+		<h1>WAN-Status</h1>
+		<br>
+		<table>
+		  <tr>
+		    <td width=\"50\" style=\"background-color: ${WAN1COLOR1}; text-align: center;\"><font class=\"vt1\">LINK</font><br><font class=\"vt2\">1</font></td>
+		    <td width=\"460\" style=\"background-color: ${WAN1COLOR2};\">
+		      <table width=\"100%\">
+		        <tr><td class=\"caption\" width=\"60\">Interface:</td><td class=\"field\">${WAN1NET}</td></tr>
+		        <tr><td class=\"caption\">Name:</td><td class=\"field\">${WAN1NAME}<//td></tr>
+		        <tr><td class=\"caption\">Device:</td><td class=\"field\">${WAN1DEV}</td></tr>
+		        <tr><td class=\"caption\">IP:</td><td class=\"field\">${WAN1IP}</td></tr>
+		        <tr><td class=\"caption\">Gateway 1:</td><td class=\"field\">${WAN1GW1}</td></tr>
+		        <tr><td class=\"caption\">Gateway 2:</td><td class=\"field\">${WAN1GW2}</td></tr>
+		        <tr><td class=\"caption\">Ping:</td><td class=\"field\">${WAN1GW2P} ping(s)</td></tr>
+		        <tr><td class=\"caption\">Status:</td><td class=\"field\">${WAN1GW2PXN}</td></tr>
+		      </table>
+		    </td>
+		    <td width=\"30\">
+		    <td width=\"50\" style=\"background-color: ${WAN2COLOR1}; text-align: center;\"><font class=\"vt1\">LINK</font><br><font class=\"vt2\">2</font></td>
+		    <td width=\"460\" style=\"background-color: ${WAN2COLOR2};\">
+		      <table width=\"100%\">
+		        <tr><td class=\"caption\" width=\"60\">Interface:</td><td class=\"field\">${WAN2NET}</td></tr>
+		        <tr><td class=\"caption\">Name:</td><td class=\"field\">${WAN2NAME}</td></tr>
+		        <tr><td class=\"caption\">Device:</td><td class=\"field\">${WAN2DEV}</td></tr>
+		        <tr><td class=\"caption\">IP:</td><td class=\"field\">${WAN2IP}</td></tr>
+		        <tr><td class=\"caption\">Gateway 1:</td><td class=\"field\">${WAN2GW1}</td></tr>
+		        <tr><td class=\"caption\">Gateway 2:</td><td class=\"field\">${WAN2GW2}</td></tr>
+		        <tr><td class=\"caption\">Ping:</td><td class=\"field\">${WAN2GW2P} ping(s)</td></tr>
+		        <tr><td class=\"caption\">Status:</td><td class=\"field\">${WAN2GW2PXN}</td></tr>
+		      </table>
+		    </td>
+		  </tr>
+		  <tr>
+		    <td colspan=\"2\" style=\"background-color: ${WAN1COLOR2};\"><table width=\"100%\">
+		      <tr><td class=\"caption\">Routing-Table <b>${WAN1NET}</b>:</td></tr>
+		      <tr><td class=\"field\"><pre>$(ip route show table 201)</pre></td></tr>
+		      <tr><td class=\"caption\">Routing-Table <b>main</b> ( ${WAN1DEV} = ${WAN1NET} ):</td></tr>
+		      <tr><td class=\"field\"><pre>$(ip route show|grep -E "${WAN1DEV}")</pre></td></tr>
+		    </table></td>
+		    <td></td>
+		    <td colspan=\"2\" style=\"background-color: ${WAN2COLOR2};\"><table width=\"100%\">
+		      <tr><td class=\"caption\">Routing-Table <b>${WAN2NET}</b>:</td></tr>
+		      <tr><td class=\"field\"><pre>$(ip route show table 202)</pre></td></tr>
+		      <tr><td class=\"caption\">Routing-Table <b>main</b> ( ${WAN2DEV} = ${WAN2NET} ):</td></tr>
+		      <tr><td class=\"field\"><pre>$(ip route show|grep -E "${WAN2DEV}")</pre></td></tr>
+		    </table></td>
+		  </tr>
+		</table>
+		<br>
+		<hr style=\"background-color: black; height: 1px; border: none; \">
+		<br>
+		<pre class=\"field\">TIME: <b>${TIME}</b>, STATUS: <b>${STATUS}</b>, VERSION: <b>${VERSION}</b></pre>
+		<br>
+		<table>
+		  <tr>
+		    <td width=\"510\" class=\"valigntop\"><font class=\"caption\">Routing-Rules ( regarding <b>main</b>, <b>${WAN1NET}</b> and <b>${WAN2NET}</b> only )</font><pre class=\"field\">$(ip rule show|grep -E "main|${WAN1NET}|${WAN2NET}")</pre></td>
+		    <td width=\"30\"></td>
+		    <td width=\"510\" class=\"valigntop\"><font class=\"caption\">Traceroute to <b>${TRACEROUTE}</b> ( first two hops only, default route )</font><pre class=\"field\">$(traceroute -n -m2 ${TRACEROUTE}|tail -n2)</pre>
+		    </td>
+		  </tr>
+		</table>"
+	
+		if [ -f "${DPATH}/log" ]; then
+		HTML="${HTML}
+		<br>
+		<font class=\"caption\">Log ( lastest events )</font><pre class=\"field\">$(cat "${DPATH}/log"|tail -n10)</pre>"
+		fi
+	
+		HTML="${HTML}
+		</div>
+		<div class=\"item\">
+		<br>
+		<font class=\"caption\">Established TCP-Connections via <b>${WAN1NAME}</b></font>
+		<pre class=\"field\">$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|grep tcp|grep HW_OFFLOAD|grep -v -E 'FIN_WAIT|CLOSE|TIME_WAIT'|awk '{print $(NF-14) " " $(NF-13) " " $(NF-12) " " $(NF-11) " <b>HW-Offload!</b>"}'|sort -V)<br>$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|grep tcp|grep ESTABLISHED|awk '{print $5 " " $6 " " $7 " " $8}'|sort -V)</pre>
+		<br>
+		<font class=\"caption\">Established TCP-Connections via <b>${WAN2NAME}</b></font>
+		<pre class=\"field\">$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|grep tcp|grep HW_OFFLOAD|grep -v -E 'FIN_WAIT|CLOSE|TIME_WAIT'|awk '{print $(NF-14) " " $(NF-13) " " $(NF-12) " " $(NF-11) " <b>HW-Offload!</b>"}'|sort -V)<br>$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|grep tcp|grep ESTABLISHED|awk '{print $5 " " $6 " " $7 " " $8}'|sort -V)</pre>
+		</div>
+		</div></blockquote></body>
+		</html>"
+	
+		echo "${HTML}" > "${DPATH}/wan-status.html.tmp"
+		mv "${DPATH}/wan-status.html.tmp" "${DPATH}/wan-status.html"
+		if [ ! -L "/www/wan-status.html" ]; then ln -s "${DPATH}/wan-status.html" "/www/wan-status.html"; fi
 
     else
 
-	# Otherwise, remove web status, if existing
-	if [ -L "/www/wan-status.html" ]; then rm "/www/wan-status.html"; fi
-	if [ -f "${DPATH}/wan-status.html" ]; then rm "${DPATH}/wan-status.html"; fi
+		# Otherwise, remove web status, if existing
+		if [ -L "/www/wan-status.html" ]; then rm "/www/wan-status.html"; fi
+		if [ -f "${DPATH}/wan-status.html" ]; then rm "${DPATH}/wan-status.html"; fi
 
     fi
 
