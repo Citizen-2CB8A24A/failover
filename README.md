@@ -11,7 +11,7 @@ Features:
 * No IPTABLES/netfilter involvement
 * Using "/tmp/", to protect flash memory
 * Session based information is gathered just once
-* WAN-status at "http://<router-IP>/wan-status.html" (can be disabled).
+* WAN-status at "http://router-IP/wan-status.html" (can be disabled).
 
 Installation:
 1.) Put this script in "/etc/" and ensure backup inclusion.
