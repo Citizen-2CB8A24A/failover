@@ -22,3 +22,7 @@ Remarks:
 The log-file "log" is created in "/tmp/failover"
 Default routes are deleted in the main table on first run.
 Default routes are recovered in their own tables, if an interface was down.
+
+License:
+Creative Commons Zero v1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/deed.en
