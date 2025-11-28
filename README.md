@@ -1,5 +1,5 @@
     # Simple OpenWRT failover script utilizing policy routing, written by Citizen-2CB8A24A in 11.2025
-    # This script considers to have two OpenWRT edge routers with their own uplinks, so it's a three router setup
+    # This script expects to have two OpenWRT edge routers with their own uplinks, so it's for a three router setup
     #
     # Features:
     # * Routing changes are done by changing the routing policy
