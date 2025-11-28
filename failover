@@ -2,14 +2,14 @@
 
     # Please configure
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    WAN1NET=wan_1													# actual OpenWRT network name for WAN-option 1
-    WAN2NET=wan_2													# actual OpenWRT network name for WAN-option 2
-    WAN1RESET="/usr/bin/ssh -i /root/.ssh/id_dropbear_ed25519 root@192.168.1.1 'ifdown wan;sleep 3;ifup wan'"		# Command to reset WAN-option 1
-    WAN2RESET="/usr/bin/ssh -i /root/.ssh/id_dropbear_ed25519 root@192.168.2.1 'ifdown wan_lte;sleep 3;ifup wan_lte'"	# Command to reset WAN-option 2
-    WAN1NAME="Fiber"													# just a visual name for WAN-option 1
-    WAN2NAME="Mobile"													# just a visual name for WAN-option 2
-    TRACEROUTE=1.1.1.1													# a traceroute target, just the first two hops are used
-    WEBSTATUS=1														# 1=on 0=off
+    WAN1NET=wan_1			# actual OpenWRT network name for WAN-option 1
+    WAN2NET=wan_2			# actual OpenWRT network name for WAN-option 2
+    WAN1RESET=""			# Command to reset WAN-option 1, example: "/usr/bin/ssh -i /root/.ssh/id_dropbear_ed25519 root@192.168.2.1 'ifdown wan_lte;sleep 3;ifup wan_lte'"
+    WAN2RESET=""			# Command to reset WAN-option 2
+    WAN1NAME="Fiber"		# just a visual name for WAN-option 1
+    WAN2NAME="Mobile"		# just a visual name for WAN-option 2
+    TRACEROUTE=1.1.1.1		# a traceroute target, just the first two hops are used
+    WEBSTATUS=1				# 1=on 0=off
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     # Misc
