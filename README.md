@@ -1,6 +1,6 @@
 Simple OpenWRT failover script utilizing policy routing, written by Citizen-2CB8A24A in 11.2025
-This is developed in a three router setup, but it can be used with one router as well.
-the latter wasn't tried yet.
+This is developed on a three router setup, but it can be used with just one router as well. Just
+do not use the (remote) link reset options (WAN1RESET, WAN2RESET) in the latter case.
 
 Features:
 * Routing changes are done by changing the routing policy
