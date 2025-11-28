@@ -1,0 +1,329 @@
+#!/bin/sh
+
+    # Simple OpenWRT failover script utilizing policy routing, written by Citizen-2CB8A24A in 11.2025
+    # This script considers to have two OpenWRT edge routers with their own uplinks, so it's a three router setup
+    #
+    # Features:
+    # * Routing changes are done by changing the routing policy
+    # * Script determines providers next hop for cheaper pings
+    # * Two pings will be sent, but just one has to come through
+    # * Ping overall timeout will be 2 seconds
+    # * Stale TCP connections get killed by "conntrack -D ..."
+    # * No IPTABLES/netfilter involvement
+    # * Using "/tmp/", to protect flash memory
+    # * Session based information is gathered just once
+    # * WAN-status at "http://<router-IP>/wan-status.html" (can be disabled).
+    #
+    # Installation:
+    # 1.) Put this script in "/etc/" and ensure backup inclusion.
+    # 2.) Adjust config section.
+    # 3.) Call this script by cron every 2-5 minutes and things will be smooth.
+    #
+    # Remarks:
+    # The log-file "log" is created in "/tmp/failover"
+    # Default routes are deleted in the main table on first run.
+    # Default routes are recovered in their own tables, if an interface was down.
+    #
+
+    # Please configure
+    # -------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    WAN1NET=wan_1													# actual OpenWRT network name for WAN-option 1
+    WAN2NET=wan_2													# actual OpenWRT network name for WAN-option 2
+    WAN1RESET="/usr/bin/ssh -i /root/.ssh/id_dropbear_ed25519 root@192.168.1.1 'ifdown wan;sleep 3;ifup wan'"		# Command to reset WAN-option 1
+    WAN2RESET="/usr/bin/ssh -i /root/.ssh/id_dropbear_ed25519 root@192.168.2.1 'ifdown wan_lte;sleep 3;ifup wan_lte'"	# Command to reset WAN-option 2
+    WAN1NAME="Fiber"													# just a visual name for WAN-option 1
+    WAN2NAME="Mobile"													# just a visual name for WAN-option 2
+    TRACEROUTE=1.1.1.1													# a traceroute target, just the first two hops are used
+    WEBSTATUS=1														# 1=on 0=off
+    # -------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+    # Misc
+    VERSION=2025.11.28
+    DPATH="/tmp/failover"
+    export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    TIME="$(date +'%Y.%m.%d %H:%M')"
+    DEBUG=1
+    LOCKFILE="${DPATH}/lock"
+    set -e
+    exec 9>"${LOCKFILE}"
+    if ! flock -n 9; then exit 1; fi
+
+    # Functions
+    log() {
+    	echo "${TIME} | ${LOGMESSAGE}" >> "${DPATH}/log"
+	if [ "${DEBUG}" = 1 ]; then echo "${LOGMESSAGE}"; fi
+    }
+    update_status() {
+	echo "${STATUS}" > "${DPATH}/status"
+	LOGMESSAGE="Default route changed to ${STATUS}"; log
+    }
+
+    # Create work directory, if needed
+    if [ ! -d "${DPATH}" ]; then mkdir "${DPATH}"; fi
+
+    # Create status file, if needed
+    if [ ! -f "${DPATH}/status" ]; then echo "NONE" > "${DPATH}/status"; fi
+    STATUS=$(cat "${DPATH}/status")
+
+    # Create channel based status files, if needed
+    if [ ! -f "${DPATH}/wan_1_px" ]; then echo "NONE" > "${DPATH}/wan_1_px"; fi
+    if [ ! -f "${DPATH}/wan_2_px" ]; then echo "NONE" > "${DPATH}/wan_2_px"; fi
+    WAN1GW2PX=$(cat "${DPATH}/wan_1_px")
+    WAN2GW2PX=$(cat "${DPATH}/wan_2_px")
+
+    # Restart remote (if configured) and local interface on offline channels
+    if [ "${WAN1GW2PX}" = "OFFLINE" ]; then
+        if [ ! -z "${WAN1RESET}" ]; then
+    		LOGMESSAGE="Restarting '${WAN1NAME}'..."; log
+    		LOGMESSAGE="CMD: ${WAN1RESET}"; log
+    		eval "${WAN1RESET}"
+    	fi
+    	ifdown "${WAN1NET}"; sleep 3; ifup "${WAN1NET}"
+    	sleep 10
+    fi
+    if [ "${WAN2GW2PX}" = "OFFLINE" ]; then
+        if [ ! -z "${WAN2RESET}" ]; then
+    		LOGMESSAGE="Restarting '${WAN2NAME}'..."; log
+    		LOGMESSAGE="CMD: ${WAN2RESET}"; log
+    		eval "${WAN2RESET}"
+    	fi
+    	ifdown "${WAN2NET}"; sleep 3; ifup "${WAN2NET}"
+    	sleep 10
+    fi
+
+    # Determine device names, do it just once per session
+    if [ ! -f "${DPATH}/wan_1_dev" ]; then uci get network.${WAN1NET}.device 2>/dev/null > "${DPATH}/wan_1_dev"; fi
+    if [ ! -f "${DPATH}/wan_2_dev" ]; then uci get network.${WAN2NET}.device 2>/dev/null > "${DPATH}/wan_2_dev"; fi
+    WAN1DEV=$(cat "${DPATH}/wan_1_dev")
+    WAN2DEV=$(cat "${DPATH}/wan_2_dev")
+
+    # Determine WAN IPs, do it just once per session or when offline
+    if [ ! -f "${DPATH}/wan_1_ip" -o "${WAN1GW2PX}" = "OFFLINE" ]; then ip addr show "${WAN1DEV}"|grep inet|awk '{print $2}'|awk -F'/' '{print $1}' > "${DPATH}/wan_1_ip"; fi
+    if [ ! -f "${DPATH}/wan_2_ip" -o "${WAN2GW2PX}" = "OFFLINE" ]; then ip addr show "${WAN2DEV}"|grep inet|awk '{print $2}'|awk -F'/' '{print $1}' > "${DPATH}/wan_2_ip"; fi
+    WAN1IP=$(cat "${DPATH}/wan_1_ip")
+    WAN2IP=$(cat "${DPATH}/wan_2_ip")
+    WAN1IPNET=$(echo ${WAN1IP}|awk -F'.' '{print $1 "." $2 "." $3}')
+    WAN2IPNET=$(echo ${WAN2IP}|awk -F'.' '{print $1 "." $2 "." $3}')
+
+    # Determine next hop IP addresses, local side (next routers LAN IP), do it just once per sesssion or when offline
+    if [ ! -f "${DPATH}/wan_1_gw1" -o "${WAN1GW2PX}" = "OFFLINE" ]; then
+      if [ "$(ip route|grep ${WAN1DEV}|grep default|wc -l)" -gt 0 ]; then
+        ip route|grep ${WAN1DEV}|grep default|awk '{print $3}' > "${DPATH}/wan_1_gw1"
+      fi
+    fi
+    if [ ! -f "${DPATH}/wan_2_gw1" -o "${WAN2GW2PX}" = "OFFLINE" ]; then
+      if [ "$(ip route|grep ${WAN2DEV}|grep default|wc -l)" -gt 0 ]; then
+        ip route|grep ${WAN2DEV}|grep default|awk '{print $3}' > "${DPATH}/wan_2_gw1"
+      fi
+    fi
+    WAN1GW1=$(cat "${DPATH}/wan_1_gw1")
+    WAN2GW1=$(cat "${DPATH}/wan_2_gw1")
+
+    # Create routing table lookup numbers, if needed
+    if [ "$(cat "/etc/iproute2/rt_tables"|grep ${WAN1NET}|wc -l)" -lt 1 ]; then echo "201 ${WAN1NET}" >> "/etc/iproute2/rt_tables"; fi
+    if [ "$(cat "/etc/iproute2/rt_tables"|grep ${WAN2NET}|wc -l)" -lt 1 ]; then echo "202 ${WAN2NET}" >> "/etc/iproute2/rt_tables"; fi
+
+    # Restore default routes in their own tables, if needed
+    if [ "$(ip route show table ${WAN1NET} 2>/dev/null|grep ${WAN1DEV}|wc -l)" -lt 1 ]; then ip route add default via ${WAN1GW1} dev ${WAN1DEV} table ${WAN1NET}; fi
+    if [ "$(ip route show table ${WAN2NET} 2>/dev/null|grep ${WAN2DEV}|wc -l)" -lt 1 ]; then ip route add default via ${WAN2GW1} dev ${WAN2DEV} table ${WAN2NET}; fi
+
+    # Determine next hop IP addresses, provider side, do it just once per session or when offline
+    # default routes in main table must be active still (first run or after interface reload)
+    if [ ! -f "${DPATH}/wan_1_gw2" -o "${WAN1GW2PX}" = "OFFLINE" ]; then
+    	WAN1NEWGW2="$(traceroute -n -i ${WAN1DEV} -m2 ${TRACEROUTE}|tail -n1|awk '{print $2}')"
+    	# Only if IP differs from WAN IP, consider that IP to be the new next hop IP
+    	if [ "${WAN1NEWGW2}" != "${WAN1IP}" ]; then echo "${WAN1NEWGW2}" > "${DPATH}/wan_1_gw2"; fi
+    fi
+    if [ ! -f "${DPATH}/wan_2_gw2" -o "${WAN2GW2PX}" = "OFFLINE" ]; then
+    	WAN2NEWGW2="$(traceroute -n -i ${WAN2DEV} -m2 ${TRACEROUTE}|tail -n1|awk '{print $2}')"
+    	# Only if IP differs from WAN IP, consider that IP to be the new next hop IP
+    	if [ "${WAN2NEWGW2}" != "${WAN2IP}" ]; then echo "${WAN2NEWGW2}" > "${DPATH}/wan_2_gw2"; fi
+    fi
+    WAN1GW2=$(cat "${DPATH}/wan_1_gw2")
+    WAN2GW2=$(cat "${DPATH}/wan_2_gw2")
+
+    # Add individual policy routing for ping endpoints, otherwise both pings would follow the actual default policy
+    if [ "$(ip rule show|grep ${WAN1GW2}|wc -l)" -lt 1 ]; then ip rule add to "${WAN1GW2}" table "${WAN1NET}" priority 50; fi
+    if [ "$(ip rule show|grep ${WAN2GW2}|wc -l)" -lt 1 ]; then ip rule add to "${WAN2GW2}" table "${WAN2NET}" priority 50; fi
+
+    # Ping GW2 hosts using correct device, but depends on either both default routes are still present (first run) or
+    # individual policy routing is set (all other runs)
+    WAN1GW2P=$(ping -w2 -c2 -I ${WAN1DEV} ${WAN1GW2}|grep received|awk '{print $4}')
+    WAN2GW2P=$(ping -w2 -c2 -I ${WAN2DEV} ${WAN2GW2}|grep received|awk '{print $4}')
+    if [ "${WAN1GW2P}" -gt 0 ]; then WAN1GW2PXN=ONLINE; else WAN1GW2PXN=OFFLINE; fi
+    if [ "${WAN2GW2P}" -gt 0 ]; then WAN2GW2PXN=ONLINE; else WAN2GW2PXN=OFFLINE; fi
+    if [ "${WAN1GW2PX}" != "${WAN1GW2PXN}" ]; then
+    	echo "${WAN1GW2PXN}" > "${DPATH}/wan_1_px"
+    	LOGMESSAGE="Provider '${WAN1NAME}' now ${WAN1GW2PXN}."; log
+    fi
+    if [ "${WAN2GW2PX}" != "${WAN2GW2PXN}" ]; then
+    	echo "${WAN2GW2PXN}" > "${DPATH}/wan_2_px"
+    	LOGMESSAGE="Provider '${WAN2NAME}' now ${WAN2GW2PXN}."; log
+    fi
+
+    # Debug summary, for manual runs at the terminal
+    echo "WAN1DEV: ${WAN1DEV}, WAN1GW1: ${WAN1GW1}, WAN1GW2: ${WAN1GW2}, WAN1GW2P: ${WAN1GW2P}, WAN1IP: ${WAN1IP}"
+    echo "WAN2DEV: ${WAN2DEV}, WAN2GW1: ${WAN2GW1}, WAN2GW2: ${WAN2GW2}, WAN2GW2P: ${WAN2GW2P}, WAN2IP: ${WAN2IP}"
+    echo "OLD STATUS: ${STATUS}"
+
+    # Remove default routes from main table, to switch to policy based routing
+    if [ "$(route -n|grep ${WAN1DEV}|grep UG|wc -l)" -gt 0 ]; then ip route del default via "${WAN1GW1}" dev "${WAN1DEV}" table main; fi
+    if [ "$(route -n|grep ${WAN2DEV}|grep UG|wc -l)" -gt 0 ]; then ip route del default via "${WAN2GW1}" dev "${WAN2DEV}" table main; fi
+
+    # Modify routing policy according to ping results, three cases are covered
+
+    # WAN1 is online, make WAN1 default
+    if [ "${WAN1GW2P}" -gt 0 ]; then
+	if ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule del from 0.0.0.0/0 table "${WAN2NET}" priority 300; fi
+	if ! ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule add from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
+	if [ "$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN2IP}" 2>/dev/null; fi
+	if [ "${STATUS}" != "${WAN1NET}" ]; then STATUS="${WAN1NET}"; update_status; fi
+    fi
+
+    # WAN1 is offline, WAN2 is online, make WAN2 default
+    if [ "${WAN1GW2P}" -lt 1 -a "${WAN2GW2P}" -gt 0 ]; then
+	if ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule del from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
+	if ! ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule add from 0.0.0.0/0 table "${WAN2NET}" priority 300 2>/dev/null; fi
+	if [ "$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN1IP}" 2>/dev/null; fi
+	if [ "${STATUS}" != "${WAN2NET}" ]; then STATUS="${WAN2NET}"; update_status; fi
+    fi
+
+    # WAN1 and WAN2 are offline, shut down all default routes
+    if [ "${WAN1GW2P}" -lt 1 -a "${WAN2GW2P}" -lt 1 ]; then
+	if ip rule show|grep 300|grep -q "${WAN1NET}"; then ip rule del from 0.0.0.0/0 table "${WAN1NET}" priority 300 2>/dev/null; fi
+	if ip rule show|grep 300|grep -q "${WAN2NET}"; then ip rule del from 0.0.0.0/0 table "${WAN2NET}" priority 300 2>/dev/null; fi
+	if [ "$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN1IP}" 2>/dev/null; fi
+	if [ "$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|wc -l)" -gt 0 ]; then conntrack -D --src-nat "${WAN2IP}" 2>/dev/null; fi
+	if [ "${STATUS}" != "OFFLINE" ]; then STATUS=OFFLINE; update_status; fi
+    fi
+
+    echo "NEW STATUS: ${STATUS}"
+
+    # Prepare web status (http://<router-IP>/wan-status.html)
+    if [ "${WEBSTATUS}" = 1 ]; then
+
+	if [ "${WAN1GW2P}" -lt 1 -o "${WAN2GW2P}" -lt 1 ]; then BGCOLOR=#400000; else BGCOLOR=#004000; fi
+	if [ "${WAN1GW2P}" -gt 0 ]; then WAN1COLOR1=#008000; WAN1COLOR2=#006000; else WAN1COLOR1=#800000; WAN1COLOR2=#600000; fi
+	if [ "${WAN2GW2P}" -gt 0 ]; then WAN2COLOR1=#008000; WAN2COLOR2=#006000; else WAN2COLOR1=#800000; WAN2COLOR2=#600000; fi
+
+	CSS="
+	body { color: white; font-family: Courier New,Monospace; font-size: 9pt; background-color: ${BGCOLOR}; }
+	td { padding: 0; border: 0; margin: 0; }
+	table { border-spacing: 0; border-collapse: collapse; }
+	h1, h2, h3, h4 { font-family: Arial; }
+	div { border: 0; margin: 0; padding: 0; }
+	pre { margin: 0; }
+	.vt1 { font-family: Arial,Sans-Serif; font-size: 6pt; }
+	.vt2 { font-family: Arial,Sans-Serif; font-size: 20pt; font-weight: bolder; }
+	.container { display: flex; justify-content: flex-start; column-gap: 50px; row-gap: 0px; }
+	.item { } @media (max-width: 1900px) { .container { flex-direction: column; } }
+	.caption { font-family: Arial,Sans-Serif; font-size: 8pt; padding: 1px 5px 1px 5px; }
+	.field { background-color: rgba(0, 0, 0, 0.5); font-size: 10pt; padding: 1px 5px 1px 5px; border: 0; margin: 0; }
+	.valigntop { vertical-align: top; }
+	.background1 { background-color: rgba(0, 0, 0, 0.5); }
+	"
+
+	HTML="
+	<!DOCTYPE html>
+	<html>
+	<head>
+	<meta http-equiv=\"refresh\" content=\"5\">
+	<meta charset=\"utf-8\">
+	<title>WAN-Status | ${STATUS}</title>
+	<style>${CSS}</style>
+	</head>
+	<body><blockquote><div class=\"container\">
+	<div class=\"item\">
+	<h1>WAN-Status</h1>
+	<br>
+	<table>
+	  <tr>
+	    <td width=\"50\" style=\"background-color: ${WAN1COLOR1}; text-align: center;\"><font class=\"vt1\">LINK</font><br><font class=\"vt2\">1</font></td>
+	    <td width=\"460\" style=\"background-color: ${WAN1COLOR2};\">
+	      <table width=\"100%\">
+	        <tr><td class=\"caption\" width=\"60\">Interface:</td><td class=\"field\">${WAN1NET}</td></tr>
+	        <tr><td class=\"caption\">Name:</td><td class=\"field\">${WAN1NAME}<//td></tr>
+	        <tr><td class=\"caption\">Device:</td><td class=\"field\">${WAN1DEV}</td></tr>
+	        <tr><td class=\"caption\">IP:</td><td class=\"field\">${WAN1IP}</td></tr>
+	        <tr><td class=\"caption\">Gateway 1:</td><td class=\"field\">${WAN1GW1}</td></tr>
+	        <tr><td class=\"caption\">Gateway 2:</td><td class=\"field\">${WAN1GW2}</td></tr>
+	        <tr><td class=\"caption\">Ping:</td><td class=\"field\">${WAN1GW2P} ping(s)</td></tr>
+	        <tr><td class=\"caption\">Status:</td><td class=\"field\">${WAN1GW2PXN}</td></tr>
+	      </table>
+	    </td>
+	    <td width=\"30\">
+	    <td width=\"50\" style=\"background-color: ${WAN2COLOR1}; text-align: center;\"><font class=\"vt1\">LINK</font><br><font class=\"vt2\">2</font></td>
+	    <td width=\"460\" style=\"background-color: ${WAN2COLOR2};\">
+	      <table width=\"100%\">
+	        <tr><td class=\"caption\" width=\"60\">Interface:</td><td class=\"field\">${WAN2NET}</td></tr>
+	        <tr><td class=\"caption\">Name:</td><td class=\"field\">${WAN2NAME}</td></tr>
+	        <tr><td class=\"caption\">Device:</td><td class=\"field\">${WAN2DEV}</td></tr>
+	        <tr><td class=\"caption\">IP:</td><td class=\"field\">${WAN2IP}</td></tr>
+	        <tr><td class=\"caption\">Gateway 1:</td><td class=\"field\">${WAN2GW1}</td></tr>
+	        <tr><td class=\"caption\">Gateway 2:</td><td class=\"field\">${WAN2GW2}</td></tr>
+	        <tr><td class=\"caption\">Ping:</td><td class=\"field\">${WAN2GW2P} ping(s)</td></tr>
+	        <tr><td class=\"caption\">Status:</td><td class=\"field\">${WAN2GW2PXN}</td></tr>
+	      </table>
+	    </td>
+	  </tr>
+	  <tr>
+	    <td colspan=\"2\" style=\"background-color: ${WAN1COLOR2};\"><table width=\"100%\">
+	      <tr><td class=\"caption\">Routing-Table <b>${WAN1NET}</b>:</td></tr>
+	      <tr><td class=\"field\"><pre>$(ip route show table 201)</pre></td></tr>
+	      <tr><td class=\"caption\">Routing-Table <b>main</b> ( ${WAN1DEV} = ${WAN1NET} ):</td></tr>
+	      <tr><td class=\"field\"><pre>$(ip route show|grep -E "${WAN1DEV}")</pre></td></tr>
+	    </table></td>
+	    <td></td>
+	    <td colspan=\"2\" style=\"background-color: ${WAN2COLOR2};\"><table width=\"100%\">
+	      <tr><td class=\"caption\">Routing-Table <b>${WAN2NET}</b>:</td></tr>
+	      <tr><td class=\"field\"><pre>$(ip route show table 202)</pre></td></tr>
+	      <tr><td class=\"caption\">Routing-Table <b>main</b> ( ${WAN2DEV} = ${WAN2NET} ):</td></tr>
+	      <tr><td class=\"field\"><pre>$(ip route show|grep -E "${WAN2DEV}")</pre></td></tr>
+	    </table></td>
+	  </tr>
+	</table>
+	<br>
+	<hr style=\"background-color: black; height: 1px; border: none; \">
+	<br>
+	<pre class=\"field\">TIME: <b>${TIME}</b>, STATUS: <b>${STATUS}</b>, VERSION: <b>${VERSION}</b></pre>
+	<br>
+	<table>
+	  <tr>
+	    <td width=\"510\" class=\"valigntop\"><font class=\"caption\">Routing-Rules ( regarding <b>main</b>, <b>${WAN1NET}</b> and <b>${WAN2NET}</b> only )</font><pre class=\"field\">$(ip rule show|grep -E "main|${WAN1NET}|${WAN2NET}")</pre></td>
+	    <td width=\"30\"></td>
+	    <td width=\"510\" class=\"valigntop\"><font class=\"caption\">Traceroute to <b>${TRACEROUTE}</b> ( first two hops only, default route )</font><pre class=\"field\">$(traceroute -n -m2 ${TRACEROUTE}|tail -n2)</pre>
+	    </td>
+	  </tr>
+	</table>"
+
+	if [ -f "${DPATH}/log" ]; then
+	HTML="${HTML}
+	<br>
+	<font class=\"caption\">Log ( lastest events )</font><pre class=\"field\">$(cat "${DPATH}/log"|tail -n10)</pre>"
+	fi
+
+	HTML="${HTML}
+	</div>
+	<div class=\"item\">
+	<br>
+	<font class=\"caption\">Established TCP-Connections via <b>${WAN1NAME}</b></font>
+	<pre class=\"field\">$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|grep tcp|grep HW_OFFLOAD|grep -v -E 'FIN_WAIT|CLOSE|TIME_WAIT'|awk '{print $(NF-14) " " $(NF-13) " " $(NF-12) " " $(NF-11) " <b>HW-Offload!</b>"}'|sort -V)<br>$(conntrack -L --src-nat ${WAN1IP} 2>/dev/null|grep tcp|grep ESTABLISHED|awk '{print $5 " " $6 " " $7 " " $8}'|sort -V)</pre>
+	<br>
+	<font class=\"caption\">Established TCP-Connections via <b>${WAN2NAME}</b></font>
+	<pre class=\"field\">$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|grep tcp|grep HW_OFFLOAD|grep -v -E 'FIN_WAIT|CLOSE|TIME_WAIT'|awk '{print $(NF-14) " " $(NF-13) " " $(NF-12) " " $(NF-11) " <b>HW-Offload!</b>"}'|sort -V)<br>$(conntrack -L --src-nat ${WAN2IP} 2>/dev/null|grep tcp|grep ESTABLISHED|awk '{print $5 " " $6 " " $7 " " $8}'|sort -V)</pre>
+	</div>
+	</div></blockquote></body>
+	</html>"
+
+	echo "${HTML}" > "${DPATH}/wan-status.html.tmp"
+	mv "${DPATH}/wan-status.html.tmp" "${DPATH}/wan-status.html"
+	if [ ! -L "/www/wan-status.html" ]; then ln -s "${DPATH}/wan-status.html" "/www/wan-status.html"; fi
+
+    else
+
+	# Otherwise, remove web status, if existing
+	if [ -L "/www/wan-status.html" ]; then rm "/www/wan-status.html"; fi
+	if [ -f "${DPATH}/wan-status.html" ]; then rm "${DPATH}/wan-status.html"; fi
+
+    fi
+
